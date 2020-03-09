@@ -7,8 +7,8 @@
 #include <string.h>
 
 static void die(const char *msg) __attribute__((__noreturn__));
-static void diemem(void) __attribute__((__noreturn__));
-static void dienum(void) __attribute__((__noreturn__));
+static void *die_if_no_memory(void *p);
+static void die_if_overflow(bool overflow);
 
 static void die(const char *msg)
 {
@@ -16,8 +16,20 @@ static void die(const char *msg)
     exit(2);
 }
 
-static void diemem(void) { die("out of memory"); }
-static void dienum(void) { die("numeric overflow"); }
+static void *die_if_no_memory(void *p)
+{
+    if (!p) {
+        die("out of memory");
+    }
+    return p;
+}
+
+static void die_if_overflow(bool overflow)
+{
+    if (overflow) {
+        die("numeric overflow");
+    }
+}
 
 static uintptr_t stackbuf[16];
 static uintptr_t *stack = stackbuf;
@@ -130,9 +142,7 @@ static void prim_plus(void)
 {
     uintptr_t a, b, c;
     pop2(&a, &b);
-    if (__builtin_add_overflow(a, b, &c)) {
-        dienum();
-    }
+    die_if_overflow(__builtin_add_overflow(a, b, &c));
     push(c);
 }
 
@@ -148,9 +158,7 @@ static void prim_pluss(void)
 {
     intptr_t a, b, c;
     pop2signed(&a, &b);
-    if (__builtin_add_overflow(a, b, &c)) {
-        dienum();
-    }
+    die_if_overflow(__builtin_add_overflow(a, b, &c));
     pushsigned(c);
 }
 
@@ -158,9 +166,7 @@ static void prim_minus(void)
 {
     uintptr_t a, b, c;
     pop2(&a, &b);
-    if (__builtin_sub_overflow(a, b, &c)) {
-        dienum();
-    }
+    die_if_overflow(__builtin_sub_overflow(a, b, &c));
     push(c);
 }
 
@@ -168,9 +174,7 @@ static void prim_minuss(void)
 {
     intptr_t a, b, c;
     pop2signed(&a, &b);
-    if (__builtin_sub_overflow(a, b, &c)) {
-        dienum();
-    }
+    die_if_overflow(__builtin_sub_overflow(a, b, &c));
     pushsigned(c);
 }
 
@@ -178,9 +182,7 @@ static void prim_star(void)
 {
     uintptr_t a, b, c;
     pop2(&a, &b);
-    if (__builtin_mul_overflow(a, b, &c)) {
-        dienum();
-    }
+    die_if_overflow(__builtin_mul_overflow(a, b, &c));
     push(c);
 }
 
@@ -188,9 +190,7 @@ static void prim_stars(void)
 {
     intptr_t a, b, c;
     pop2signed(&a, &b);
-    if (__builtin_mul_overflow(a, b, &c)) {
-        dienum();
-    }
+    die_if_overflow(__builtin_mul_overflow(a, b, &c));
     pushsigned(c);
 }
 
@@ -202,21 +202,13 @@ static void prim_words(void)
 
 static void prim_allocate(void)
 {
-    void *p;
-    if (!(p = calloc(1, popsize()))) {
-        diemem();
-    }
-    pushpointer(p);
+    pushpointer(die_if_no_memory(calloc(1, popsize())));
 }
 
 static void prim_reallocate(void)
 {
-    void *p;
-    p = poppointer();
-    if (!(p = realloc(p, popsize()))) {
-        diemem();
-    }
-    pushpointer(p);
+    void *p = poppointer();
+    pushpointer(die_if_no_memory(realloc(p, popsize())));
 }
 
 static void prim_deallocate(void) { free(poppointer()); }
