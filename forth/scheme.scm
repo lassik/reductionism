@@ -52,9 +52,12 @@
 (do-times-loop 0 > & proc call 1 - ...)
 (do-times proc! do-times-loop)
 
-(hallo "Whee" show-bytes newline)
+(os-stdout 1)
+(os-check || os-error-message 2 os-write 2 os-exit)
+(dump-bytes os-stdout os-write os-check drop)
+(hallo "Whee" dump-bytes newline)
 (main grab
       10 buf .bytes iota!
-      ;;10 buf .bytes read-back
+      10 buf .bytes read-back
       buf .bytes 10 show-bytes newline
       10 'hallo do-times)

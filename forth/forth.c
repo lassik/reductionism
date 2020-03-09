@@ -41,12 +41,18 @@ static void push(uintptr_t x) { *stack++ = x; }
 static void pushsigned(intptr_t x) { push((uintptr_t)x); }
 static void pushpointer(void *x) { push((uintptr_t)x); }
 static void pushfunc(word_func_t func) { push((uintptr_t)func); }
+static void push_c_string(const char *str)
+{
+    push((uintptr_t)str);
+    push(strlen(str));
+}
 
 static uintptr_t peek(void) { return stack[-1]; }
 static uintptr_t pop(void) { return *--stack; }
 static void drop(void) { stack--; }
 static void *poppointer(void) { return (void *)(pop()); }
-static size_t popsize(void) { return pop(); }
+static size_t popsize(void) { return (size_t)pop(); }
+static int popint(void) { return (int)pop(); }
 
 static void pop2(uintptr_t *a, uintptr_t *b)
 {
@@ -71,6 +77,8 @@ static void peekpopsigned(intptr_t *a, intptr_t *b)
     *b = (intptr_t)(pop());
     *a = (intptr_t)(peek());
 }
+
+#include "forth_os_unix.h"
 
 static void prim_flag(void) { push(flag); }
 

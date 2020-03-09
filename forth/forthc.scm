@@ -66,7 +66,8 @@
    (map (lambda (sym)
           (cons sym (string-append "prim_" (mangle-word-part sym))))
         '(drop dup flag words call allocate reallocate deallocate
-               show shows show-hex show-byte show-bytes))))
+               show shows show-hex show-byte show-bytes
+               os-error-message os-exit os-read os-write))))
 
 (define (read-all)
   (let loop ((xs '()))
