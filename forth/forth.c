@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef void (*word_func_t)(void);
+
 static void die(const char *msg) __attribute__((__noreturn__));
 static void *die_if_no_memory(void *p);
 static void die_if_overflow(bool overflow);
@@ -38,6 +40,7 @@ static bool flag;
 static void push(uintptr_t x) { *stack++ = x; }
 static void pushsigned(intptr_t x) { push((uintptr_t)x); }
 static void pushpointer(void *x) { push((uintptr_t)x); }
+static void pushfunc(word_func_t func) { push((uintptr_t)func); }
 
 static uintptr_t peek(void) { return stack[-1]; }
 static uintptr_t pop(void) { return *--stack; }
@@ -200,6 +203,12 @@ static void prim_words(void)
     prim_star();
 }
 
+static void prim_call(void)
+{
+    word_func_t func = (word_func_t)poppointer();
+    func();
+}
+
 static void prim_allocate(void)
 {
     pushpointer(die_if_no_memory(calloc(1, popsize())));
@@ -237,16 +246,27 @@ static void prim_byte_store(void)
     *p = (uint8_t)(pop());
 }
 
-static void prim_dot(void) { fprintf(stderr, "%" PRIuPTR "\n", peek()); }
-
-static void prim_hex_dot(void)
-{
-    fprintf(stderr, "0x%" PRIxPTR "\n", peek());
-}
+static void prim_show(void) { fprintf(stderr, "%" PRIuPTR "\n", peek()); }
 
 static void prim_shows(void)
 {
     fprintf(stderr, "%" PRIdPTR "\n", (intptr_t)peek());
+}
+
+static void prim_show_hex(void)
+{
+    fprintf(stderr, "0x%" PRIxPTR "\n", peek());
+}
+
+static void prim_show_byte(void)
+{
+    fprintf(stderr, "%c", (int)(uint8_t)(peek()));
+}
+
+static void prim_show_bytes(void)
+{
+    size_t n = popsize();
+    fwrite(poppointer(), 1, n, stderr);
 }
 
 #include "scheme.h"

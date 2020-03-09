@@ -37,16 +37,24 @@
 (put 10 buf byte!)
 (get buf byte@)
 
-(show |.|)
-
 (variables bu)
 
-(iota-loop 0 > & dup bu byte! bu 1 + bu! 1 - ...)
+(iota-loop 1 -s 0 >=s & dup #x30 + bu byte! bu 1 + bu! ...)
 (iota! bu! iota-loop drop)
 
 (read-back-loop 0 > & 1 - bu 1 - bu! bu byte@ show drop ...)
 (read-back bu! dup bu + bu! read-back-loop drop)
 
+(newline 10 show-byte drop)
+(space 32 show-byte drop)
+
+(variables proc)
+(do-times-loop 0 > & proc call 1 - ...)
+(do-times proc! do-times-loop)
+
+(hallo "Whee" show-bytes newline)
 (main grab
       10 buf .bytes iota!
-      10 buf .bytes read-back)
+      ;;10 buf .bytes read-back
+      buf .bytes 10 show-bytes newline
+      10 'hallo do-times)
