@@ -67,6 +67,7 @@
           (cons sym (string-append "prim_" (mangle-word-part sym))))
         '(drop dup flag words call allocate reallocate deallocate
                show shows show-hex show-byte show-bytes
+               max->bitmask
                os-error-message os-exit os-read os-write))))
 
 (define (read-all)

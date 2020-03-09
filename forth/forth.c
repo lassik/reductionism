@@ -1,6 +1,7 @@
 // Forth runtime
 
 #include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -209,6 +210,14 @@ static void prim_words(void)
 {
     push(sizeof(uintptr_t));
     prim_star();
+}
+
+static void prim_max__bitmask(void)
+{
+    unsigned long x = pop();
+    unsigned int width = sizeof(x) * CHAR_BIT;
+    unsigned int hi_bit = width - (unsigned int)__builtin_clzl(x);
+    push((((uintptr_t)1) << hi_bit) - 1UL);
 }
 
 static void prim_call(void)

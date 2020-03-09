@@ -32,6 +32,15 @@
 (t-string-in-port 11)
 (t-string-out-port 12)
 
+(t-mask 12 max->bitmask)
+
+(obj-tag @)
+(obj-tag! !)
+(port-buf 1 nth-word)
+(port-name 2 nth-word)
+(port-os-handle 3 nth-word)
+(port-position 4 nth-word)
+
 (grab buf-allocate buf!
       16 buf buf-resize!)
 (put 10 buf byte!)
@@ -60,4 +69,5 @@
       10 buf .bytes iota!
       10 buf .bytes read-back
       buf .bytes 10 show-bytes newline
-      10 'hallo do-times)
+      10 'hallo do-times
+      t-mask show drop)
