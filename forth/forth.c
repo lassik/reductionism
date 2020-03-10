@@ -38,6 +38,13 @@ static uintptr_t stackbuf[16];
 static uintptr_t *stack = stackbuf;
 static bool flag;
 
+static size_t bytes_from_cells(uintptr_t n)
+{
+    size_t nbytes;
+    die_if_overflow(__builtin_mul_overflow(n, sizeof(void *), &nbytes));
+    return nbytes;
+}
+
 static void push(uintptr_t x) { *stack++ = x; }
 static void pushsigned(intptr_t x) { push((uintptr_t)x); }
 static void pushpointer(void *x) { push((uintptr_t)x); }
@@ -49,7 +56,13 @@ static void push_c_string(const char *str)
 }
 
 static uintptr_t peek(void) { return stack[-1]; }
-static uintptr_t pop(void) { return *--stack; }
+static uintptr_t pop(void)
+{
+    if (stack <= stackbuf) {
+        die("underflow");
+    }
+    return *--stack;
+}
 static void drop(void) { stack--; }
 static void *poppointer(void) { return (void *)(pop()); }
 static size_t popsize(void) { return (size_t)pop(); }
@@ -87,11 +100,18 @@ static void prim_drop(void) { drop(); }
 
 static void prim_dup(void) { push(peek()); }
 
+static void prim_ne(void)
+{
+    uintptr_t a, b;
+    peekpop(&a, &b);
+    flag = a != b;
+}
+
 static void prim_eq(void)
 {
     uintptr_t a, b;
     peekpop(&a, &b);
-    push(a == b);
+    flag = a == b;
 }
 
 static void prim_lt(void)
@@ -206,7 +226,7 @@ static void prim_stars(void)
     pushsigned(c);
 }
 
-static void prim_words(void)
+static void prim_cells(void)
 {
     push(sizeof(uintptr_t));
     prim_star();
@@ -218,6 +238,13 @@ static void prim_max__bitmask(void)
     unsigned int width = sizeof(x) * CHAR_BIT;
     unsigned int hi_bit = width - (unsigned int)__builtin_clzl(x);
     push((((uintptr_t)1) << hi_bit) - 1UL);
+}
+
+static void prim_and_bits(void)
+{
+    uintptr_t a, b;
+    pop2(&a, &b);
+    push(a & b);
 }
 
 static void prim_call(void)
@@ -263,6 +290,12 @@ static void prim_byte_store(void)
     *p = (uint8_t)(pop());
 }
 
+static void prim_zero_cells(void)
+{
+    size_t nbytes = bytes_from_cells(popsize());
+    memset_s(poppointer(), nbytes, 0, nbytes);
+}
+
 static void prim_show(void) { fprintf(stderr, "%" PRIuPTR "\n", peek()); }
 
 static void prim_shows(void)
@@ -284,6 +317,21 @@ static void prim_show_bytes(void)
 {
     size_t n = popsize();
     fwrite(poppointer(), 1, n, stderr);
+}
+
+static void prim_show_stack(void)
+{
+    uintptr_t *p;
+
+    fprintf(stderr, "(");
+    p = stackbuf;
+    if (p < stack) {
+        fprintf(stderr, "%" PRIdPTR, *p++);
+    }
+    while (p < stack) {
+        fprintf(stderr, " %" PRIdPTR, *p++);
+    }
+    fprintf(stderr, ") %c\n", flag ? 'T' : 'F');
 }
 
 #include "scheme.h"

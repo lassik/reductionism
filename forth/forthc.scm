@@ -45,6 +45,7 @@
 (define dictionary
   (append
    '(
+     (<> . "prim_ne")
      (=  . "prim_eq")
      (<  . "prim_lt")
      (<= . "prim_le")
@@ -65,9 +66,9 @@
      )
    (map (lambda (sym)
           (cons sym (string-append "prim_" (mangle-word-part sym))))
-        '(drop dup flag words call allocate reallocate deallocate
-               show shows show-hex show-byte show-bytes
-               max->bitmask
+        '(drop dup flag cells call allocate reallocate deallocate
+               show shows show-hex show-byte show-bytes show-stack zero-cells
+               max->bitmask and-bits
                os-error-message os-exit os-read os-write))))
 
 (define (read-all)
