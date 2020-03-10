@@ -232,12 +232,20 @@ static void prim_cells(void)
     prim_star();
 }
 
-static void prim_max__bitmask(void)
+static void prim_cell_bits(void) { push(sizeof(uintptr_t) * CHAR_BIT); }
+
+static void prim_max__n_bits(void)
 {
     unsigned long x = pop();
     unsigned int width = sizeof(x) * CHAR_BIT;
-    unsigned int hi_bit = width - (unsigned int)__builtin_clzl(x);
-    push((((uintptr_t)1) << hi_bit) - 1UL);
+    unsigned int n_bits = width - (unsigned int)__builtin_clzl(x);
+    push(n_bits);
+}
+
+static void prim_n_bits__bitmask(void)
+{
+    uintptr_t n_bits = pop();
+    push(((uintptr_t)1 << n_bits) - 1);
 }
 
 static void prim_and_bits(void)

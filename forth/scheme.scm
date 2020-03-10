@@ -37,7 +37,7 @@
 (t-syntax 1)
 (t-builtin 2)
 (t-closure 3)
-(t-integer 4)
+(t-bignum 4)
 (t-character 5)
 (t-string 6)
 (t-symbol 7)
@@ -47,7 +47,15 @@
 (t-string-in-port 11)
 (t-string-out-port 12)
 
-(t-mask 12 max->bitmask)
+(t-bits 12 max->n-bits)
+(t-mask t-bits n-bits->bitmask)
+
+(fixnum-bits cell-bits t-bits -)
+(max-fixnum fixnum-bits 1 - n-bits->bitmask)
+(min-fixnum -1 max-fixnum -s)
+
+(min-cell 0)
+(max-cell -1)
 
 (cells/object 1 cells/buf +)
 (obj-tag @)
@@ -60,10 +68,17 @@
 (obj-null? obj-type t-null = drop)
 
 (string-buf 1 cells +)
+(symbol-buf string-buf)
 (port-buf 1 nth-cell)
 (port-name 2 nth-cell)
 (port-os-handle 3 nth-cell)
 (port-position 4 nth-cell)
+
+(bignum-nlimb  1 nth-cell)
+(bignum-nlimb! 1 nth-cell!)
+(bignum-limbs  2 cells +)
+(bignum-nth-limb  1 + cells + @)
+(bignum-nth-limb! 1 + cells + !)
 
 ;;; Allocate more objects
 
@@ -95,6 +110,7 @@
 
 (row-col->addr (row col) col! row!
                cells/object cells col * row nth-row +)
+
 (reserve-obj (tag obj)
              tag!
              find-free-obj maybe-new-row row-col->addr obj!
@@ -107,12 +123,22 @@
             len buf .len!
             buf)
 
-(mk-string (len bytes obj buf)
-           len! bytes!
-           t-string reserve-obj obj!
-           obj string-buf buf!
-           len buf .len!
-           bytes buf .bytes!
+(mk-stringlike (len bytes tag obj buf)
+               tag! len! bytes!
+               tag reserve-obj obj!
+               obj string-buf buf!
+               len buf .len!
+               bytes buf .bytes!
+               obj)
+
+(mk-string t-string mk-stringlike)
+(mk-symbol t-symbol mk-stringlike)
+
+(mk-bignum (limb obj)
+           limb!
+           t-bignum reserve-obj obj!
+           1 obj bignum-nlimb!
+           limb obj 0 bignum-nth-limb!
            obj)
 
 ;;;
@@ -137,13 +163,19 @@
 (buf->bytes-len (buf) buf! buf .bytes buf .len)
 (dump-buf buf->bytes-len dump-bytes)
 
+(display-bignum (bn) bn! bn 0 bignum-nth-limb show-hex drop)
+
+(d-bignum t-bignum = & drop display-bignum)
 (d-string t-string = & drop string-buf dump-buf)
+(d-symbol t-symbol = & drop symbol-buf dump-buf)
 (d-bad-obj drop "#<bad object>" dump-bytes)
-(display dup obj-type d-string || d-bad-obj)
+(display dup obj-type d-bignum || d-string || d-symbol || d-bad-obj)
 
 (main 16 rows-cap!
-      10 'hallo do-times
+      max-fixnum show-hex
+      min-fixnum show-hex
+      #x12345678 mk-bignum display newline
       "foo bar" mk-string display newline
-      "baz qux" mk-string display newline
+      "baz qux" mk-symbol display newline
       "foo bar" mk-string display newline
       "baz qux" mk-string display newline)

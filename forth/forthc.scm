@@ -68,7 +68,7 @@
           (cons sym (string-append "prim_" (mangle-word-part sym))))
         '(drop dup flag cells call allocate reallocate deallocate
                show shows show-hex show-byte show-bytes show-stack zero-cells
-               max->bitmask and-bits
+               cell-bits max->n-bits n-bits->bitmask and-bits
                os-error-message os-exit os-read os-write))))
 
 (define (read-all)
@@ -172,7 +172,7 @@
                          (disp ind "push(" n ");")))
                       ((exact-integer? part)
                        (if (negative? part)
-                           (disp ind "push(" part ");")
+                           (disp ind "pushsigned(" part ");")
                            (disp ind "push(" part ");")))
                       (else
                        (error "What?" part))))
