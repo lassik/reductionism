@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAXKBYTES 64
 #define MAXLOCALS 16
 #define MAXTOKENS 1024
 #define SOURCE "scheme.4th"
@@ -69,10 +68,8 @@ static struct token token_eof = { .tag = TOK_EOF };
 static struct vec *tokens;
 static size_t tokens_pos;
 
-static size_t source_mark;
 static size_t source_pos;
-static size_t source_len;
-static char source[1024 * MAXKBYTES];
+static struct vec *source;
 
 static void panic(const char *msg) __attribute__((__noreturn__));
 
@@ -197,49 +194,51 @@ static void write_unsigned(uintptr_t u) { printf("%" PRIuPTR "\n", u); }
 
 static void slurp(void)
 {
+    const size_t chunk_cap = 512;
+    char *chunk;
     FILE *input;
+    size_t empty, chunk_len;
 
     if (!(input = fopen(SOURCE, "rb"))) {
         panic("cannot open " SOURCE);
     }
-    source_len = fread(source, 1, sizeof(source), input);
-    if (ferror(input)) {
-        panic("cannot read from file");
-    }
-    if (source_len == sizeof(source)) {
-        panic("source code is too long, add more KILOS");
-    }
-    if (memchr(source, 0, source_len)) {
-        panic("source code contains null byte");
-    }
-    if (!feof(input)) {
-        panic("eof not reached");
-    }
+    do {
+        chunk = vec_reserve(source, chunk_cap);
+        chunk_len = fread(chunk, 1, chunk_cap, input);
+        if (ferror(input)) {
+            panic("cannot read from file");
+        }
+        empty = chunk_cap - chunk_len;
+    } while (!empty);
+    source->len -= empty;
     if (fclose(input) != 0) {
         panic("cannot close file");
+    }
+    if (memchr(source->items, 0, source->len)) {
+        panic("source code contains null byte");
     }
 }
 
 static int read_char_if(int (*predicate)(int))
 {
-    if (source_pos >= source_len) {
+    if (source_pos >= source->len) {
         return 0;
     }
-    if (!predicate(source[source_pos])) {
+    if (!predicate(source->items[source_pos])) {
         return 0;
     }
-    return source[source_pos++];
+    return source->items[source_pos++];
 }
 
 static int read_the_char(int ch)
 {
-    if (source_pos >= source_len) {
+    if (source_pos >= source->len) {
         return 0;
     }
-    if (source[source_pos] != ch) {
+    if (source->items[source_pos] != ch) {
         return 0;
     }
-    return source[source_pos++];
+    return source->items[source_pos++];
 }
 
 static int is_word_char(int ch)
@@ -283,7 +282,7 @@ static void read_string_token(void)
 {
     struct token *tok;
 
-    source_mark = source_pos;
+    source->mark = source_pos;
     while (!read_the_char('"')) {
         if (read_char_if(is_string_char)) {
             ;
@@ -292,7 +291,8 @@ static void read_string_token(void)
         }
     }
     tok = allocate_token(TOK_STRING);
-    tok->string = xstrdupspan(source + source_mark, source + source_pos - 1);
+    tok->string = xstrdupspan((char *)source->items + source->mark,
+        (char *)source->items + source_pos - 1);
 }
 
 static int parse_number(const char *str, const char *limit, uintptr_t *out)
@@ -330,16 +330,17 @@ static void read_word_token_or_panic(void)
 {
     struct token *tok;
 
-    source_mark = source_pos;
+    source->mark = source_pos;
     while (read_char_if(is_word_char))
         ;
-    if (source_mark == source_pos) {
+    if (source->mark == source_pos) {
         panic("Syntax error at top level");
     }
     tok = allocate_token(TOK_WORD);
-    tok->string = xstrdupspan(source + source_mark, source + source_pos);
-    if (parse_number(
-            source + source_mark, source + source_pos, &tok->number)) {
+    tok->string = xstrdupspan((char *)source->items + source->mark,
+        (char *)source->items + source_pos);
+    if (parse_number((char *)source->items + source->mark,
+            (char *)source->items + source_pos, &tok->number)) {
         tok->tag = TOK_INT;
     }
 }
@@ -348,7 +349,7 @@ static void tokenize(void)
 {
     for (;;) {
         skip_whitespace();
-        if (source_pos == source_len) {
+        if (source_pos == source->len) {
             break;
         } else if (read_the_char('\\')) {
             skip_rest_of_line();
@@ -695,6 +696,7 @@ int main(void)
 {
     mangle_pool = vec_new(sizeof(char *));
     tokens = vec_new(sizeof(struct token));
+    source = vec_new(sizeof(char));
     define_builtin(":", compile_definition, TOPLEVEL | LOCKED);
     define_builtin("variable", compile_variable, TOPLEVEL | LOCKED);
     define_builtin("&", compile_and, INNER | LOCKED);
