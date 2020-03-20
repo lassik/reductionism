@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAXLOCALS 16
 #define MAXTOKENS 1024
 #define SOURCE "scheme.4th"
 
@@ -61,8 +60,7 @@ static struct vec *mangle_pool;
 static struct definition definitions[MAXTOKENS];
 static size_t definitions_count;
 
-static struct local locals[MAXLOCALS];
-static size_t locals_count;
+static struct vec *locals;
 
 static struct token token_eof = { .tag = TOK_EOF };
 static struct vec *tokens;
@@ -518,23 +516,19 @@ static void add_local_variable(const char *forth_var_name)
 {
     struct local *local;
 
-    if (locals_count >= MAXLOCALS) {
-        panic("too many locals");
-    }
-    local = &locals[locals_count++];
+    local = vec_reserve(locals, 1);
     local->forth_var_name = forth_var_name;
+    local->c_var_name = mangle("local_", forth_var_name);
     local->c_getter_name = copy_string(forth_var_name);
     local->c_setter_name = copy_two_strings(forth_var_name, "!");
-    mangle("local_", forth_var_name);
 }
 
 static void for_each_local(void (*func)(struct local *))
 {
-    struct local *local;
+    size_t i;
 
-    local = locals + locals_count;
-    while (local > locals) {
-        func(--local);
+    for (i = locals->len; i;) {
+        func(vec_get(locals, --i));
     }
 }
 
@@ -695,6 +689,7 @@ static void compile_recurse(void)
 int main(void)
 {
     mangle_pool = vec_new(sizeof(char *));
+    locals = vec_new(sizeof(struct local));
     tokens = vec_new(sizeof(struct token));
     source = vec_new(sizeof(char));
     define_builtin(":", compile_definition, TOPLEVEL | LOCKED);
