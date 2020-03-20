@@ -65,10 +65,9 @@ static size_t definitions_count;
 static struct local locals[MAXLOCALS];
 static size_t locals_count;
 
-static size_t tokens_pos;
-static size_t tokens_count;
-static struct token tokens[MAXTOKENS];
 static struct token token_eof = { .tag = TOK_EOF };
+static struct vec *tokens;
+static size_t tokens_pos;
 
 static size_t source_mark;
 static size_t source_pos;
@@ -263,10 +262,7 @@ static struct token *allocate_token(size_t tag)
 {
     struct token *tok;
 
-    if (tokens_count >= MAXTOKENS) {
-        panic("too many tokens");
-    }
-    tok = &tokens[tokens_count++];
+    tok = vec_reserve(tokens, 1);
     tok->tag = tag;
     return tok;
 }
@@ -366,28 +362,35 @@ static void tokenize(void)
 
 static struct token *read_token(size_t tag_bits)
 {
-    if (tokens_pos >= tokens_count) {
+    struct token *tok;
+
+    if (tokens_pos >= tokens->len) {
         if (tag_bits & TOK_EOF) {
             return &token_eof;
-        } else {
-            return 0;
         }
-    }
-    if (!(tokens[tokens_pos].tag & tag_bits)) {
         return 0;
     }
-    return &tokens[tokens_pos++];
+    tok = vec_get(tokens, tokens_pos);
+    if (!(tok->tag & tag_bits)) {
+        return 0;
+    }
+    tokens_pos++;
+    return tok;
 }
 
 static struct token *read_the_word(const char *word)
 {
-    if (tokens_pos >= tokens_count) {
+    struct token *tok;
+
+    if (tokens_pos >= tokens->len) {
         return 0;
     }
-    if (!token_is_word(&tokens[tokens_pos], word)) {
+    tok = vec_get(tokens, tokens_pos);
+    if (!token_is_word(tok, word)) {
         return 0;
     }
-    return &tokens[tokens_pos++];
+    tokens_pos++;
+    return tok;
 }
 
 static int mangle_pool_contains(const char *mangled)
@@ -691,6 +694,7 @@ static void compile_recurse(void)
 int main(void)
 {
     mangle_pool = vec_new(sizeof(char *));
+    tokens = vec_new(sizeof(struct token));
     define_builtin(":", compile_definition, TOPLEVEL | LOCKED);
     define_builtin("variable", compile_variable, TOPLEVEL | LOCKED);
     define_builtin("&", compile_and, INNER | LOCKED);
