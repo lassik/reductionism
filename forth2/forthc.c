@@ -27,6 +27,7 @@ struct vec {
     size_t itemsize;
     size_t cap;
     size_t len;
+    size_t mark;
 };
 
 struct token {
@@ -53,12 +54,10 @@ static const char ascii[] = "0123456789"
                             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                             "abcdefghijklmnopqrstuvwxyz";
 
-static const char *mangle_one_char[] = { "=equal", "@fetch", "!store",
-    "+plus", "-minus", "*star", "/slash", "?_p", 0 };
-static const char *mangle_two_char[] = { "->to", 0 };
-static char *manglepool[MAXTOKENS];
-static size_t manglepool_count;
-static char mangle_buf[64];
+static const char *mangle_one_char[] = { "=_equal", "@_fetch", "!_store",
+    "+_plus", "-_minus", "*_star", "/_slash", "?_p", 0 };
+static const char *mangle_two_char[] = { "->_to_", 0 };
+static struct vec *mangle_pool;
 
 static struct definition definitions[MAXTOKENS];
 static size_t definitions_count;
@@ -138,6 +137,20 @@ static struct vec *vec_new(size_t itemsize)
     struct vec *vec = zeroalloc(sizeof(*vec));
     vec->itemsize = itemsize;
     return vec;
+}
+
+static void *vec_get(struct vec *vec, size_t i)
+{
+    return vec->items + vec->itemsize * i;
+}
+
+static void vec_mark(struct vec *vec) { vec->mark = vec->len; }
+
+static void vec_clear_to_mark(struct vec *vec)
+{
+    memset(vec->items + vec->itemsize * vec->mark, 0,
+        vec->itemsize * (vec->cap - vec->mark));
+    vec->len = vec->mark;
 }
 
 static void *vec_reserve(struct vec *vec, size_t nitem)
@@ -370,106 +383,83 @@ static struct token *read_the_word(const char *word)
     return &tokens[tokens_pos++];
 }
 
-static void mangle_clear(void) { memset(mangle_buf, 0, sizeof(mangle_buf)); }
-
-static void mangle_putc(int ch)
+static int mangle_pool_contains(const char *mangled)
 {
-    size_t n = strlen(mangle_buf);
-    if (n == sizeof(mangle_buf) - 1) {
-        panic("token too long");
-    }
-    mangle_buf[n] = (char)ch;
-}
-
-static void mangle_puts(const char *str)
-{
-    for (; *str; str++) {
-        mangle_putc(*str);
-    }
-}
-
-static void mangle_putu(uintptr_t u)
-{
-    char buf[32];
-    char *p = buf + sizeof(buf);
-
-    *--p = 0;
-    do {
-        *--p = '0' + u % 10;
-    } while ((u /= 10) && (p > buf));
-    mangle_puts(p);
-}
-
-static void mangle_range(const char *str, const char *limit)
-{
-    const char *entry;
-    const char **entryp;
-
-    for (; str < limit; str++) {
-        for (entryp = mangle_two_char; (entry = *entryp); entryp++) {
-            if (str < limit - 1) {
-                if ((str[0] == entry[0]) && (str[1] == entry[1])) {
-                    break;
-                }
-            }
-        }
-        if (entry) {
-            mangle_puts(&entry[2]);
-            continue;
-        }
-        for (entryp = mangle_one_char; (entry = *entryp); entryp++) {
-            if (str[0] == entry[0]) {
-                break;
-            }
-        }
-        if (entry) {
-            mangle_puts(&entry[1]);
-            continue;
-        }
-        if (!strchr(ascii, *str)) {
-            mangle_putc('_');
-            continue;
-        }
-        mangle_putc(*str);
-    }
-}
-
-static int manglepool_contains()
-{
+    const char **sp;
+    const char *s;
     size_t i;
 
-    for (i = 0; i < manglepool_count; i++) {
-        if (!memcmp(manglepool[i], mangle_buf, strlen(mangle_buf))) {
+    for (i = 0; i < mangle_pool->len; i++) {
+        sp = vec_get(mangle_pool, i);
+        s = *sp;
+        if (!strcmp(mangled, s)) {
             return 1;
         }
     }
     return 0;
 }
 
+static char *mangle_pool_add(const char *mangled)
+{
+    char **mangledp;
+
+    mangledp = vec_reserve(mangle_pool, 1);
+    *mangledp = copy_string(mangled);
+    return *mangledp;
+}
+
 static char *mangle(const char *prefix, const char *forth_word)
 {
-    uintptr_t n;
-    char *pivot;
-    char *mangled;
+    const char *entry;
+    const char **entryp;
+    struct vec *mangled;
+    size_t n;
 
-    mangle_clear();
-    mangle_puts(prefix);
-    mangle_range(forth_word, forth_word + strlen(forth_word));
-    pivot = mangle_buf + strlen(mangle_buf);
+    mangled = vec_new(sizeof(char));
+    vec_puts(mangled, prefix);
+    for (; forth_word[0]; forth_word++) {
+        for (entryp = mangle_two_char; (entry = *entryp); entryp++) {
+            if (forth_word[0] == entry[0]) {
+                if (forth_word[1] == entry[1]) {
+                    break;
+                }
+            }
+        }
+        if (entry) {
+            vec_puts(mangled, &entry[2]);
+            forth_word++;
+            continue;
+        }
+        for (entryp = mangle_one_char; (entry = *entryp); entryp++) {
+            if (forth_word[0] == entry[0]) {
+                break;
+            }
+        }
+        if (entry) {
+            vec_puts(mangled, &entry[1]);
+            continue;
+        }
+        if (!strchr(ascii, forth_word[0])) {
+            vec_putc(mangled, '_');
+            continue;
+        }
+        vec_putc(mangled, forth_word[0]);
+    }
+    vec_mark(mangled);
     n = 0;
     for (;;) {
-        if (!manglepool_contains()) {
+        char num[32];
+        vec_putc(mangled, 0);
+        if (!mangle_pool_contains((char *)mangled->items)) {
             break;
         }
         n++;
-        *pivot = 0;
-        mangle_putc('_');
-        mangle_putu(n);
+        snprintf(num, sizeof(num), "%zu", n);
+        vec_clear_to_mark(mangled);
+        vec_putc(mangled, '_');
+        vec_puts(mangled, num);
     }
-    if (!(mangled = strdup(mangle_buf))) {
-        panic("out of memory");
-    }
-    return mangled;
+    return mangle_pool_add((char *)mangled->items);
 }
 
 static const char *lookup(struct token *tok, size_t required_tag)
@@ -704,6 +694,7 @@ static void compile_recurse(void)
 
 int main(void)
 {
+    mangle_pool = vec_new(sizeof(char *));
     define_builtin(":", compile_definition, TOPLEVEL | LOCKED);
     define_builtin("variable", compile_variable, TOPLEVEL | LOCKED);
     define_builtin("&", compile_and, INNER | LOCKED);
@@ -718,5 +709,11 @@ int main(void)
         printf("%2zu  %s\n", tok->tag, tok->string);
         // lookup(TOPLEVEL);
     }
+    printf("%s\n", mangle("foo_", "bar->baz"));
+    printf("%s\n", mangle("foo_", "bar->baz"));
+    printf("%s\n", mangle("foo_", "bar->baz"));
+    printf("%s\n", mangle("foo_", "bar_to_baz"));
+    printf("%s\n", mangle("foo_", "bar_to_baz_3"));
+    printf("%s\n", mangle("foo_", "bar_to_baz_3"));
     return 0;
 }
