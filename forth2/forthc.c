@@ -183,6 +183,13 @@ static void vec_puts(struct vec *vec, const char *str)
     vec_putb(vec, str, strlen(str));
 }
 
+static void vec_putd(struct vec *vec, int n)
+{
+    char s[16];
+    snprintf(s, sizeof(s), "%d", n);
+    vec_puts(vec, s);
+}
+
 static void write(const char *str) { printf("%s", str); }
 
 static void writeln(const char *str) { printf("%s\n", str); }
@@ -413,16 +420,14 @@ static char *mangle(const char *prefix, const char *forth_word)
     const char *entry;
     const char **entryp;
     struct vec *mangled;
-    size_t n;
+    int n;
 
     mangled = vec_new(sizeof(char));
     vec_puts(mangled, prefix);
     for (; forth_word[0]; forth_word++) {
         for (entryp = mangle_two_char; (entry = *entryp); entryp++) {
-            if (forth_word[0] == entry[0]) {
-                if (forth_word[1] == entry[1]) {
-                    break;
-                }
+            if ((forth_word[0] == entry[0]) && (forth_word[1] == entry[1])) {
+                break;
             }
         }
         if (entry) {
@@ -439,25 +444,16 @@ static char *mangle(const char *prefix, const char *forth_word)
             vec_puts(mangled, &entry[1]);
             continue;
         }
-        if (!strchr(ascii, forth_word[0])) {
-            vec_putc(mangled, '_');
-            continue;
-        }
-        vec_putc(mangled, forth_word[0]);
+        vec_putc(mangled, strchr(ascii, forth_word[0]) ? forth_word[0] : '_');
     }
     vec_mark(mangled);
+    vec_putc(mangled, 0);
     n = 0;
-    for (;;) {
-        char num[32];
-        vec_putc(mangled, 0);
-        if (!mangle_pool_contains((char *)mangled->items)) {
-            break;
-        }
-        n++;
-        snprintf(num, sizeof(num), "%zu", n);
+    while (mangle_pool_contains((char *)mangled->items)) {
         vec_clear_to_mark(mangled);
         vec_putc(mangled, '_');
-        vec_puts(mangled, num);
+        vec_putd(mangled, ++n);
+        vec_putc(mangled, 0);
     }
     return mangle_pool_add((char *)mangled->items);
 }
