@@ -560,7 +560,7 @@ static void rollback_local(struct local *local)
 
 static void rollback_locals(void) { for_each_local(rollback_local); }
 
-static void compile_variable(void)
+static void compile_top_level_variable(void)
 {
     struct definition *def;
     struct token *tok;
@@ -596,7 +596,7 @@ static void compile_variable(void)
     displayln("}");
 }
 
-static void compile_definition(void)
+static void compile_top_level_definition(void)
 {
     struct token *tok;
     struct definition *def;
@@ -721,8 +721,8 @@ int main(void)
     tokens = vec_new(sizeof(struct token));
     source = vec_new(sizeof(char));
 
-    define_compile_top_level("variable", compile_variable);
-    define_compile_top_level(":", compile_definition);
+    define_compile_top_level("variable", compile_top_level_variable);
+    define_compile_top_level(":", compile_top_level_definition);
 
     define_compile("(", compile_parentheses);
     define_compile("'", compile_quote);
