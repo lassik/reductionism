@@ -1,2 +1,6 @@
+*.dSYM
 forth/scheme
 forth/scheme.h
+forth2/forthc
+forth2/scheme
+forth2/scheme.h
