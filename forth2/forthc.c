@@ -4,13 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAXTOKENS 1024
 #define SOURCE "scheme.4th"
 
-#define TOPLEVEL (1 << 0)
-#define INNER (1 << 1)
-#define LOCKED (1 << 2)
-#define USER (1 << 3)
+#define DEF_COMPILE (1 << 0)
+#define DEF_TOP_LEVEL (1 << 1)
+#define DEF_PRIMITIVE (1 << 2)
+#define DEF_USER (1 << 3)
+
 //#define LOCAL (1 << 4)
 
 #define TOK_EOF (1 << 0)
@@ -37,15 +37,17 @@ struct token {
 struct definition {
     const char *forth_word;
     char *c_func_name;
-    void (*compile_func)(void);
+    void (*compile)(void);
     size_t tag;
 };
 
 struct local {
-    const char *forth_name;
-    char *forth_name_setter;
+    const char *forth_word;
+    char *forth_word_setter;
     char *c_var_name;
 };
+
+static const char indent[] = "    ";
 
 static const char ascii[] = "0123456789"
                             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -55,10 +57,7 @@ static const char *mangle_one_char[] = { "=_equal", "@_fetch", "!_store",
     "+_plus", "-_minus", "*_star", "/_slash", "?_p", 0 };
 static const char *mangle_two_char[] = { "->_to_", 0 };
 static struct vec *mangle_pool;
-
-static struct definition definitions[MAXTOKENS];
-static size_t definitions_count;
-
+static struct vec *definitions;
 static struct vec *locals;
 
 static struct token token_eof = { .tag = TOK_EOF };
@@ -68,11 +67,19 @@ static size_t tokens_pos;
 static size_t source_pos;
 static struct vec *source;
 
-static void panic(const char *msg) __attribute__((__noreturn__));
+static void panic(const char *s) __attribute__((__noreturn__));
+static void panic1(const char *s1, const char *s2)
+    __attribute__((__noreturn__));
 
-static void panic(const char *msg)
+static void panic(const char *s)
 {
-    fprintf(stderr, "%s\n", msg);
+    fprintf(stderr, "%s\n", s);
+    exit(2);
+}
+
+static void panic1(const char *s1, const char *s2)
+{
+    fprintf(stderr, "%s %s\n", s1, s2);
     exit(2);
 }
 
@@ -187,7 +194,9 @@ static void write(const char *str) { printf("%s", str); }
 
 static void writeln(const char *str) { printf("%s\n", str); }
 
-static void write_unsigned(uintptr_t u) { printf("%" PRIuPTR "\n", u); }
+static void write_unsigned(uintptr_t u) { printf("%" PRIuPTR, u); }
+
+static void newline(void) { printf("\n"); }
 
 static void slurp(void)
 {
@@ -459,66 +468,72 @@ static char *mangle(const char *prefix, const char *forth_word)
     return mangle_pool_add((char *)mangled->bytes);
 }
 
-static const char *lookup(struct token *tok, size_t required_tag)
+static struct definition *lookup(const char *forth_word, size_t required_tag)
 {
-    struct definition *def;
-
-    def = definitions + definitions_count;
-    while (def > definitions) {
-        --def;
-        if (token_is_word(tok, def->forth_word)) {
-            if ((tok->tag & required_tag) != required_tag) {
-                panic("definition is not suitable for use");
-            }
-            return def->c_func_name;
+    size_t i = definitions->len;
+    while (i) {
+        struct definition *def = vec_get(definitions, --i);
+        if (strcmp(def->forth_word, forth_word)) {
+            continue;
         }
+        if ((def->tag & required_tag) != required_tag) {
+            panic1("definition is not of the expected type:", forth_word);
+        }
+        return def;
     }
-    panic("not defined");
+    return 0;
 }
 
-static struct definition *allocate_definition(void)
+static struct definition *allocate_definition(const char *forth_word)
 {
     struct definition *def;
 
-    for (def = definitions; def < definitions + MAXTOKENS; def++) {
-        if (!def->forth_word) {
-            memset(def, 0, sizeof(*def));
-            return def;
-        }
-    }
-    panic("exceeded");
-}
-
-static struct definition *define(const char *forth_word)
-{
-    struct definition *def;
-
-    def = allocate_definition();
+    def = lookup(forth_word, 0);
+    if (!def)
+        def = vec_reserve(definitions, 1);
+    memset(def, 0, sizeof(*def));
     def->forth_word = forth_word;
-    def->c_func_name = mangle("word_", forth_word);
-    def->tag = INNER;
     return def;
 }
 
-static void define_builtin(
-    void *forth_word, void (*compile_func)(void), size_t tag)
+static void define_compile_top_level(
+    const char *forth_word, void (*compile)(void))
 {
-    struct definition *def;
-
-    def = allocate_definition();
-    def->forth_word = forth_word;
-    def->compile_func = compile_func;
-    def->tag = tag;
+    struct definition *def = allocate_definition(forth_word);
+    def->tag = DEF_COMPILE | DEF_TOP_LEVEL;
+    def->compile = compile;
 }
 
-static void add_local_variable(const char *forth_name)
+static void define_compile(const char *forth_word, void (*compile)(void))
+{
+    struct definition *def = allocate_definition(forth_word);
+    def->tag = DEF_COMPILE;
+    def->compile = compile;
+}
+
+static void define_primitive(const char *forth_word, const char *c_func_name)
+{
+    struct definition *def = allocate_definition(forth_word);
+    def->tag = DEF_PRIMITIVE;
+    def->c_func_name = copy_string(c_func_name);
+}
+
+static struct definition *define_user(const char *forth_word)
+{
+    struct definition *def = allocate_definition(forth_word);
+    def->tag = DEF_USER;
+    def->c_func_name = mangle("word_", forth_word);
+    return def;
+}
+
+static void add_local_variable(const char *forth_word)
 {
     struct local *local;
 
     local = vec_reserve(locals, 1);
-    local->forth_name = forth_name;
-    local->forth_name_setter = copy_two_strings(forth_name, "!");
-    local->c_var_name = mangle("local_", forth_name);
+    local->forth_word = forth_word;
+    local->forth_word_setter = copy_two_strings(forth_word, "!");
+    local->c_var_name = mangle("local_", forth_word);
 }
 
 static void for_each_local(void (*func)(struct local *))
@@ -549,35 +564,33 @@ static void compile_variable(void)
 {
     struct definition *def;
     struct token *tok;
-    char *var_forth_word;
+    char *forth_word;
+    char *forth_word_setter;
     char *c_var_name;
 
     if (!(tok = read_token(TOK_WORD))) {
         panic("variable name expected");
     }
+    forth_word = tok->string;
+    forth_word_setter = copy_two_strings(forth_word, "!");
+    c_var_name = mangle("var_", forth_word);
 
-    var_forth_word = tok->string;
-    c_var_name = mangle("var_", var_forth_word);
-
-    def = allocate_definition();
-    def->forth_word = var_forth_word;
-    def->c_func_name = mangle("word_", def->forth_word);
-    def->tag = INNER;
+    def = define_user(forth_word);
     write("static void word_");
     write(def->c_func_name);
     writeln("(void) {");
+    write(indent);
     write("push(");
     write(c_var_name);
     writeln(");");
     writeln("}");
+    newline();
 
-    def = allocate_definition();
-    def->forth_word = copy_two_strings(var_forth_word, "!");
-    def->c_func_name = mangle("word_", def->forth_word);
-    def->tag = INNER;
+    def = define_user(forth_word_setter);
     write("static void word_");
     write(def->c_func_name);
     writeln("(void) {");
+    write(indent);
     write(c_var_name);
     writeln(" = pop();");
     writeln("}");
@@ -591,7 +604,7 @@ static void compile_definition(void)
     if (!(tok = read_token(TOK_WORD))) {
         panic("word name expected");
     }
-    def = define(tok->string);
+    def = define_user(tok->string);
     write("static void ");
     write(def->c_func_name);
     writeln("(void) {");
@@ -600,10 +613,12 @@ static void compile_definition(void)
             // compile_inner_word(tok);
         } else if ((tok = read_token(TOK_QUOTED_WORD))) {
         } else if ((tok = read_token(TOK_STRING))) {
+            write(indent);
             write("push((uintptr_t)stringpool_");
             write_unsigned(tok->number);
             writeln(");");
         } else if ((tok = read_token(TOK_CHAR | TOK_INT))) {
+            write(indent);
             write("push(");
             write_unsigned(tok->number);
             writeln(");");
@@ -616,26 +631,23 @@ static void compile_definition(void)
 
 static void compile_quote(void)
 {
-    struct token *name;
-    const char *mangled;
+    struct definition *def;
+    struct token *tok;
+    char *forth_word;
 
-    if (!(name = read_token(TOK_WORD))) {
+    if (!(tok = read_token(TOK_WORD))) {
         panic("word name expected");
     }
-    if (!(mangled = lookup(name, INNER | USER))) {
-        panic("not defined");
+    forth_word = tok->string;
+    if (!(def = lookup(forth_word, DEF_USER))) {
+        panic1("not defined:", forth_word);
     }
-#if 0
-    if (def->type != USER) {
-        panic("trying to quote something that is not a user word");
-    }
-#endif
     write("push((uintptr_t)");
-    write(mangled);
+    write(def->c_func_name);
     writeln(");");
 }
 
-static void compile_paren(void)
+static void compile_parentheses(void)
 {
     struct token *tok;
     struct vec *buf;
@@ -676,39 +688,107 @@ static void compile_or(void) { writeln("if (flag) return;"); }
 
 static void compile_recurse(void)
 {
-    write(definitions[definitions_count - 1].c_func_name);
+    struct definition *def = vec_get(definitions, definitions->len - 1);
+    write(def->c_func_name);
     writeln("();");
 }
 
 // static void compile_word(struct token *tok, size_t context) {}
 
-// static void compile_top_level(void) { panic("unknown top-level syntax"); }
+static int compile_top_level(void)
+{
+    struct definition *def;
+    struct token *tok;
+    const char *forth_word;
+
+    if (read_token(TOK_EOF))
+        return 0;
+    if (!(tok = read_token(TOK_WORD)))
+        panic("unknown top-level syntax");
+    forth_word = tok->string;
+    if (!(def = lookup(forth_word, DEF_TOP_LEVEL)))
+        panic1("no top-level definition: ", forth_word);
+    newline();
+    def->compile();
+    return 1;
+}
 
 int main(void)
 {
     mangle_pool = vec_new(sizeof(char *));
+    definitions = vec_new(sizeof(struct definition));
     locals = vec_new(sizeof(struct local));
     tokens = vec_new(sizeof(struct token));
     source = vec_new(sizeof(char));
-    define_builtin(":", compile_definition, TOPLEVEL | LOCKED);
-    define_builtin("variable", compile_variable, TOPLEVEL | LOCKED);
-    define_builtin("&", compile_and, INNER | LOCKED);
-    define_builtin("|", compile_or, INNER | LOCKED);
-    define_builtin("recurse", compile_recurse, INNER | LOCKED);
-    define_builtin("'", compile_quote, INNER | LOCKED);
-    define_builtin("(", compile_paren, INNER | LOCKED);
+
+    define_compile_top_level("variable", compile_variable);
+    define_compile_top_level(":", compile_definition);
+
+    define_compile("(", compile_parentheses);
+    define_compile("'", compile_quote);
+    define_compile("&", compile_and);
+    define_compile("|", compile_or);
+    define_compile("recurse", compile_recurse);
+
+    define_primitive("<>", "prim_ne");
+    define_primitive("=", "prim_eq");
+    define_primitive("<", "prim_lt");
+    define_primitive("<=", "prim_le");
+    define_primitive(">", "prim_gt");
+    define_primitive(">=", "prim_ge");
+    define_primitive(">=s", "prim_ge_s");
+    define_primitive("+", "prim_plus");
+    define_primitive("+s", "prim_plus_s");
+    define_primitive("+carry", "prim_plus_carry");
+    define_primitive("-", "prim_minus");
+    define_primitive("-s", "prim_minus_s");
+    define_primitive("*", "prim_star");
+    define_primitive("*s", "prim_star_s");
+    define_primitive("@", "prim_fetch");
+    define_primitive("!", "prim_store");
+    define_primitive("byte@", "prim_byte_fetch");
+    define_primitive("byte!", "prim_byte_store");
+    define_primitive("allocate", "prim_allocate");
+    define_primitive("and-bits", "prim_and_bits");
+    define_primitive("call", "prim_call");
+    define_primitive("cell-bits", "prim_cell_bits");
+    define_primitive("cells", "prim_cells");
+    define_primitive("deallocate", "prim_deallocate");
+    define_primitive("drop", "prim_drop");
+    define_primitive("dup", "prim_dup");
+    define_primitive("flag", "prim_flag");
+    define_primitive("max->n-bits", "prim_max_to_n_bits");
+    define_primitive("n-bits->bitmask", "prim_n_bits_to_bitmask");
+    define_primitive("or-bits", "prim_or_bits");
+    define_primitive("os-error-message", "prim_os_error_message");
+    define_primitive("os-exit", "prim_os_exit");
+    define_primitive("os-read", "prim_os_read");
+    define_primitive("os-write", "prim_os_write");
+    define_primitive("reallocate", "prim_reallocate");
+    define_primitive("show", "prim_show");
+    define_primitive("show-byte", "prim_show_byte");
+    define_primitive("show-bytes", "prim_show_bytes");
+    define_primitive("show-hex", "prim_show_hex");
+    define_primitive("show-stack", "prim_show_stack");
+    define_primitive("shows", "prim_shows");
+    define_primitive("zero-cells", "prim_zero_cells");
+
     slurp();
     tokenize();
+#if 0
     while (!read_token(TOK_EOF)) {
         struct token *tok = read_token((size_t)-1);
         printf("%2zu  %s\n", tok->tag, tok->string);
         // lookup(TOPLEVEL);
     }
+#endif
     printf("%s\n", mangle("foo_", "bar->baz"));
     printf("%s\n", mangle("foo_", "bar->baz"));
     printf("%s\n", mangle("foo_", "bar->baz"));
     printf("%s\n", mangle("foo_", "bar_to_baz"));
     printf("%s\n", mangle("foo_", "bar_to_baz_3"));
     printf("%s\n", mangle("foo_", "bar_to_baz_3"));
+    while (compile_top_level())
+        ;
     return 0;
 }
