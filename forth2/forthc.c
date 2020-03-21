@@ -775,19 +775,6 @@ int main(void)
 
     slurp();
     tokenize();
-#if 0
-    while (!read_token(TOK_EOF)) {
-        struct token *tok = read_token((size_t)-1);
-        printf("%2zu  %s\n", tok->tag, tok->string);
-        // lookup(TOPLEVEL);
-    }
-#endif
-    printf("%s\n", mangle("foo_", "bar->baz"));
-    printf("%s\n", mangle("foo_", "bar->baz"));
-    printf("%s\n", mangle("foo_", "bar->baz"));
-    printf("%s\n", mangle("foo_", "bar_to_baz"));
-    printf("%s\n", mangle("foo_", "bar_to_baz_3"));
-    printf("%s\n", mangle("foo_", "bar_to_baz_3"));
     while (compile_top_level())
         ;
     return 0;
