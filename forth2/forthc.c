@@ -190,11 +190,11 @@ static void vec_putd(struct vec *vec, int n)
     vec_puts(vec, s);
 }
 
-static void write(const char *str) { printf("%s", str); }
+static void display(const char *str) { printf("%s", str); }
 
-static void writeln(const char *str) { printf("%s\n", str); }
+static void displayln(const char *str) { printf("%s\n", str); }
 
-static void write_unsigned(uintptr_t u) { printf("%" PRIuPTR, u); }
+static void display_uintptr(uintptr_t u) { printf("%" PRIuPTR, u); }
 
 static void newline(void) { printf("\n"); }
 
@@ -547,8 +547,8 @@ static void for_each_local(void (*func)(struct local *))
 
 static void compile_local(struct local *local)
 {
-    write(local->c_var_name);
-    writeln(" = pop();");
+    display(local->c_var_name);
+    displayln(" = pop();");
 }
 
 static void compile_locals(void) { for_each_local(compile_local); }
@@ -576,24 +576,24 @@ static void compile_variable(void)
     c_var_name = mangle("var_", forth_word);
 
     def = define_user(forth_word);
-    write("static void word_");
-    write(def->c_func_name);
-    writeln("(void) {");
-    write(indent);
-    write("push(");
-    write(c_var_name);
-    writeln(");");
-    writeln("}");
+    display("static void word_");
+    display(def->c_func_name);
+    displayln("(void) {");
+    display(indent);
+    display("push(");
+    display(c_var_name);
+    displayln(");");
+    displayln("}");
     newline();
 
     def = define_user(forth_word_setter);
-    write("static void word_");
-    write(def->c_func_name);
-    writeln("(void) {");
-    write(indent);
-    write(c_var_name);
-    writeln(" = pop();");
-    writeln("}");
+    display("static void word_");
+    display(def->c_func_name);
+    displayln("(void) {");
+    display(indent);
+    display(c_var_name);
+    displayln(" = pop();");
+    displayln("}");
 }
 
 static void compile_definition(void)
@@ -605,27 +605,27 @@ static void compile_definition(void)
         panic("word name expected");
     }
     def = define_user(tok->string);
-    write("static void ");
-    write(def->c_func_name);
-    writeln("(void) {");
+    display("static void ");
+    display(def->c_func_name);
+    displayln("(void) {");
     while (!read_the_word(";")) {
         if ((tok = read_token(TOK_WORD))) {
             // compile_inner_word(tok);
         } else if ((tok = read_token(TOK_QUOTED_WORD))) {
         } else if ((tok = read_token(TOK_STRING))) {
-            write(indent);
-            write("push((uintptr_t)stringpool_");
-            write_unsigned(tok->number);
-            writeln(");");
+            display(indent);
+            display("push((uintptr_t)stringpool_");
+            display_uintptr(tok->number);
+            displayln(");");
         } else if ((tok = read_token(TOK_CHAR | TOK_INT))) {
-            write(indent);
-            write("push(");
-            write_unsigned(tok->number);
-            writeln(");");
+            display(indent);
+            display("push(");
+            display_uintptr(tok->number);
+            displayln(");");
         } else {
         }
     }
-    writeln("}");
+    displayln("}");
     rollback_locals();
 }
 
@@ -642,9 +642,9 @@ static void compile_quote(void)
     if (!(def = lookup(forth_word, DEF_USER))) {
         panic1("not defined:", forth_word);
     }
-    write("push((uintptr_t)");
-    write(def->c_func_name);
-    writeln(");");
+    display("push((uintptr_t)");
+    display(def->c_func_name);
+    displayln(");");
 }
 
 static void compile_parentheses(void)
@@ -682,15 +682,15 @@ static void compile_parentheses(void)
     }
 }
 
-static void compile_and(void) { writeln("if (!flag) return;"); }
+static void compile_and(void) { displayln("if (!flag) return;"); }
 
-static void compile_or(void) { writeln("if (flag) return;"); }
+static void compile_or(void) { displayln("if (flag) return;"); }
 
 static void compile_recurse(void)
 {
     struct definition *def = vec_get(definitions, definitions->len - 1);
-    write(def->c_func_name);
-    writeln("();");
+    display(def->c_func_name);
+    displayln("();");
 }
 
 // static void compile_word(struct token *tok, size_t context) {}
