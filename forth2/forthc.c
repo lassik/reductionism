@@ -21,7 +21,7 @@
 #define TOK_INT (1 << 5)
 
 struct vec {
-    unsigned char *items;
+    unsigned char *bytes;
     size_t itemsize;
     size_t cap;
     size_t len;
@@ -135,14 +135,14 @@ static struct vec *vec_new(size_t itemsize)
 
 static void *vec_get(struct vec *vec, size_t i)
 {
-    return vec->items + vec->itemsize * i;
+    return vec->bytes + vec->itemsize * i;
 }
 
 static void vec_mark(struct vec *vec) { vec->mark = vec->len; }
 
 static void vec_clear_to_mark(struct vec *vec)
 {
-    memset(vec->items + vec->itemsize * vec->mark, 0,
+    memset(vec->bytes + vec->itemsize * vec->mark, 0,
         vec->itemsize * (vec->cap - vec->mark));
     vec->len = vec->mark;
 }
@@ -156,11 +156,11 @@ static void *vec_reserve(struct vec *vec, size_t nitem)
         while (vec->cap - vec->len < nitem) {
             vec->cap *= 2;
         }
-        if (!(vec->items = realloc(vec->items, vec->cap * vec->itemsize))) {
+        if (!(vec->bytes = realloc(vec->bytes, vec->cap * vec->itemsize))) {
             panic("out of memory");
         }
     }
-    void *p = vec->items + vec->len * vec->itemsize;
+    void *p = vec->bytes + vec->len * vec->itemsize;
     vec->len += nitem;
     return p;
 }
@@ -212,7 +212,7 @@ static void slurp(void)
     if (fclose(input) != 0) {
         panic("cannot close file");
     }
-    if (memchr(source->items, 0, source->len)) {
+    if (memchr(source->bytes, 0, source->len)) {
         panic("source code contains null byte");
     }
 }
@@ -222,10 +222,10 @@ static int read_char_if(int (*predicate)(int))
     if (source_pos >= source->len) {
         return 0;
     }
-    if (!predicate(source->items[source_pos])) {
+    if (!predicate(source->bytes[source_pos])) {
         return 0;
     }
-    return source->items[source_pos++];
+    return source->bytes[source_pos++];
 }
 
 static int read_the_char(int ch)
@@ -233,10 +233,10 @@ static int read_the_char(int ch)
     if (source_pos >= source->len) {
         return 0;
     }
-    if (source->items[source_pos] != ch) {
+    if (source->bytes[source_pos] != ch) {
         return 0;
     }
-    return source->items[source_pos++];
+    return source->bytes[source_pos++];
 }
 
 static int is_word_char(int ch)
@@ -289,8 +289,8 @@ static void read_string_token(void)
         }
     }
     tok = allocate_token(TOK_STRING);
-    tok->string = xstrdupspan((char *)source->items + source->mark,
-        (char *)source->items + source_pos - 1);
+    tok->string = xstrdupspan((char *)source->bytes + source->mark,
+        (char *)source->bytes + source_pos - 1);
 }
 
 static int parse_number(const char *str, const char *limit, uintptr_t *out)
@@ -335,10 +335,10 @@ static void read_word_token_or_panic(void)
         panic("Syntax error at top level");
     }
     tok = allocate_token(TOK_WORD);
-    tok->string = xstrdupspan((char *)source->items + source->mark,
-        (char *)source->items + source_pos);
-    if (parse_number((char *)source->items + source->mark,
-            (char *)source->items + source_pos, &tok->number)) {
+    tok->string = xstrdupspan((char *)source->bytes + source->mark,
+        (char *)source->bytes + source_pos);
+    if (parse_number((char *)source->bytes + source->mark,
+            (char *)source->bytes + source_pos, &tok->number)) {
         tok->tag = TOK_INT;
     }
 }
@@ -451,13 +451,13 @@ static char *mangle(const char *prefix, const char *forth_word)
     vec_mark(mangled);
     vec_putc(mangled, 0);
     n = 0;
-    while (mangle_pool_contains((char *)mangled->items)) {
+    while (mangle_pool_contains((char *)mangled->bytes)) {
         vec_clear_to_mark(mangled);
         vec_putc(mangled, '_');
         vec_putd(mangled, ++n);
         vec_putc(mangled, 0);
     }
-    return mangle_pool_add((char *)mangled->items);
+    return mangle_pool_add((char *)mangled->bytes);
 }
 
 static const char *lookup(struct token *tok, size_t required_tag)
