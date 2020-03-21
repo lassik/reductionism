@@ -11,14 +11,12 @@
 #define DEF_PRIMITIVE (1 << 2)
 #define DEF_USER (1 << 3)
 
-//#define LOCAL (1 << 4)
-
 #define TOK_EOF (1 << 0)
 #define TOK_WORD (1 << 1)
-#define TOK_QUOTED_WORD (1 << 2)
 #define TOK_STRING (1 << 3)
 #define TOK_CHAR (1 << 4)
-#define TOK_INT (1 << 5)
+#define TOK_UINT (1 << 5)
+#define TOK_NEGINT (1 << 6)
 
 struct vec {
     unsigned char *bytes;
@@ -54,7 +52,7 @@ static const char ascii[] = "0123456789"
                             "abcdefghijklmnopqrstuvwxyz";
 
 static const char *mangle_one_char[] = { "=_equal", "@_fetch", "!_store",
-    "+_plus", "-_minus", "*_star", "/_slash", "?_p", 0 };
+    "+_plus", "*_star", "/_slash", "?_p", 0 };
 static const char *mangle_two_char[] = { "->_to_", 0 };
 static struct vec *mangle_pool;
 static struct vec *definitions;
@@ -83,13 +81,21 @@ static void panic1(const char *s1, const char *s2)
     exit(2);
 }
 
-static char *xstrdupspan(const char *start, const char *limit)
+static void *zeroalloc(size_t nbyte)
+{
+    void *p = calloc(nbyte, 1);
+    if (!p)
+        panic("out of memory");
+    return p;
+}
+
+static char *copy_string_span(const char *start, const char *limit)
 {
     char *dup;
     size_t len;
 
     len = (size_t)(limit - start);
-    if (!(dup = calloc(1, len + 1))) {
+    if (!(dup = zeroalloc(len + 1))) {
         panic("out of memory");
     }
     memcpy(dup, start, len);
@@ -98,13 +104,7 @@ static char *xstrdupspan(const char *start, const char *limit)
 
 static char *copy_string(const char *str)
 {
-    char *dup;
-
-    if (!(dup = calloc(1, strlen(str) + 1))) {
-        panic("out of memory");
-    }
-    memcpy(dup, str, strlen(str) + 1);
-    return dup;
+    return copy_string_span(str, str + strlen(str));
 }
 
 static char *copy_two_strings(const char *a, const char *b)
@@ -114,22 +114,12 @@ static char *copy_two_strings(const char *a, const char *b)
 
     alen = strlen(a);
     blen = strlen(b);
-    if (!(dup = calloc(1, alen + blen + 1))) {
+    if (!(dup = zeroalloc(alen + blen + 1))) {
         panic("out of memory");
     }
     memcpy(dup, a, alen);
     memcpy(dup + alen, b, blen);
     return dup;
-}
-
-static void *zeroalloc(size_t nbyte)
-{
-    void *p;
-
-    if (!(p = calloc(1, nbyte))) {
-        panic("out of memory");
-    }
-    return p;
 }
 
 static struct vec *vec_new(size_t itemsize)
@@ -297,18 +287,23 @@ static void read_string_token(void)
         }
     }
     tok = allocate_token(TOK_STRING);
-    tok->string = xstrdupspan((char *)source->bytes + source->mark,
+    tok->string = copy_string_span((char *)source->bytes + source->mark,
         (char *)source->bytes + source_pos - 1);
 }
 
-static int parse_number(const char *str, const char *limit, uintptr_t *out)
+static int parse_number(const char *str, const char *limit, struct token *tok)
 {
     const char digits[] = "0123456789abcdef";
-    const char *digit;
-    uintptr_t value;
+    const char *digitp;
+    uintptr_t digit, value;
     size_t base = 10;
+    int is_negative;
 
-    *out = value = 0;
+    value = 0;
+    is_negative = (str[0] == '-');
+    if (is_negative) {
+        str++;
+    }
     if (str[0] == '0') {
         if (str[1] == 'b') {
             base = 2;
@@ -322,13 +317,18 @@ static int parse_number(const char *str, const char *limit, uintptr_t *out)
         }
     }
     while (str < limit) {
-        if (!(digit = strchr(digits, *str++))) {
+        if (!(digitp = strchr(digits, *str++))) {
+            return 0;
+        }
+        digit = (uintptr_t)(digitp - digits);
+        if (digit >= base) {
             return 0;
         }
         value *= base;
-        value += (uintptr_t)(digit - digits);
+        value += digit;
     }
-    *out = value;
+    tok->tag = is_negative ? TOK_NEGINT : TOK_UINT;
+    tok->number = value;
     return 1;
 }
 
@@ -343,12 +343,10 @@ static void read_word_token_or_panic(void)
         panic("Syntax error at top level");
     }
     tok = allocate_token(TOK_WORD);
-    tok->string = xstrdupspan((char *)source->bytes + source->mark,
+    tok->string = copy_string_span((char *)source->bytes + source->mark,
         (char *)source->bytes + source_pos);
-    if (parse_number((char *)source->bytes + source->mark,
-            (char *)source->bytes + source_pos, &tok->number)) {
-        tok->tag = TOK_INT;
-    }
+    parse_number((char *)source->bytes + source->mark,
+                 (char *)source->bytes + source_pos, tok);
 }
 
 static void tokenize(void)
@@ -526,39 +524,57 @@ static struct definition *define_user(const char *forth_word)
     return def;
 }
 
-static void add_local_variable(const char *forth_word)
+static struct local *lookup_local(const char *forth_word, int *out_is_setter)
+{
+    *out_is_setter = 0;
+    size_t i = locals->len;
+    while (i) {
+        struct local *local = vec_get(locals, --i);
+        if (!strcmp(forth_word, local->forth_word)) {
+            return local;
+        }
+        if (!strcmp(forth_word, local->forth_word_setter)) {
+            *out_is_setter = 1;
+            return local;
+        }
+    }
+    return 0;
+}
+
+static void add_local(const char *forth_word)
 {
     struct local *local;
 
     local = vec_reserve(locals, 1);
-    local->forth_word = forth_word;
+    local->forth_word = copy_string(forth_word);
     local->forth_word_setter = copy_two_strings(forth_word, "!");
     local->c_var_name = mangle("local_", forth_word);
 }
 
-static void for_each_local(void (*func)(struct local *))
+static void compile_locals(void)
 {
-    size_t i;
-
-    for (i = locals->len; i;) {
-        func(vec_get(locals, --i));
+    size_t i = locals->len;
+    while (i > locals->mark) {
+        if (i < locals->len)
+            display(indent);
+        struct local *local = vec_get(locals, --i);
+        display("uintptr_t ");
+        display(local->c_var_name);
+        displayln(" = pop();");
     }
 }
 
-static void compile_local(struct local *local)
+static void rollback_locals(void)
 {
-    display(local->c_var_name);
-    displayln(" = pop();");
+    size_t i = locals->len;
+    while (i) {
+        struct local *local = vec_get(locals, --i);
+        free(local->forth_word_setter);
+        // free(local->c_var_name); //! TODO: use-after-free
+    }
+    locals->mark = 0;
+    vec_clear_to_mark(locals);
 }
-
-static void compile_locals(void) { for_each_local(compile_local); }
-
-static void rollback_local(struct local *local)
-{
-    memset(local, 0, sizeof(*local));
-}
-
-static void rollback_locals(void) { for_each_local(rollback_local); }
 
 static void compile_top_level_variable(void)
 {
@@ -575,8 +591,13 @@ static void compile_top_level_variable(void)
     forth_word_setter = copy_two_strings(forth_word, "!");
     c_var_name = mangle("var_", forth_word);
 
+    display("static uintptr_t ");
+    display(c_var_name);
+    displayln(";");
+    newline();
+
     def = define_user(forth_word);
-    display("static void word_");
+    display("static void ");
     display(def->c_func_name);
     displayln("(void) {");
     display(indent);
@@ -587,7 +608,7 @@ static void compile_top_level_variable(void)
     newline();
 
     def = define_user(forth_word_setter);
-    display("static void word_");
+    display("static void ");
     display(def->c_func_name);
     displayln("(void) {");
     display(indent);
@@ -599,7 +620,10 @@ static void compile_top_level_variable(void)
 static void compile_top_level_definition(void)
 {
     struct token *tok;
+    struct local *local;
     struct definition *def;
+    struct definition *inner_def;
+    int is_setter;
 
     if (!(tok = read_token(TOK_WORD))) {
         panic("word name expected");
@@ -609,20 +633,47 @@ static void compile_top_level_definition(void)
     display(def->c_func_name);
     displayln("(void) {");
     while (!read_the_word(";")) {
+        display(indent);
         if ((tok = read_token(TOK_WORD))) {
-            // compile_inner_word(tok);
-        } else if ((tok = read_token(TOK_QUOTED_WORD))) {
+            const char *forth_word = tok->string;
+            if ((local = lookup_local(forth_word, &is_setter))) {
+                if (!is_setter) {
+                    display("push(");
+                    display(local->c_var_name);
+                    displayln(");");
+                } else {
+                    display(local->c_var_name);
+                    displayln(" = pop();");
+                }
+            } else if ((inner_def = lookup(forth_word, 0))) {
+                if (inner_def->tag == DEF_COMPILE) {
+                    inner_def->compile();
+                } else if ((inner_def->tag == DEF_PRIMITIVE)
+                    || (inner_def->tag == DEF_USER)) {
+                    display(inner_def->c_func_name);
+                    displayln("();");
+                } else {
+                    panic1("cannot use that in a definition:", forth_word);
+                }
+            } else {
+                panic1("not defined:", forth_word);
+            }
         } else if ((tok = read_token(TOK_STRING))) {
-            display(indent);
-            display("push((uintptr_t)stringpool_");
-            display_uintptr(tok->number);
+            display("push((uintptr_t)(unsigned char *)");
+            display("\"");
+            display(tok->string);
+            display("\"");
             displayln(");");
-        } else if ((tok = read_token(TOK_CHAR | TOK_INT))) {
-            display(indent);
+        } else if ((tok = read_token(TOK_CHAR | TOK_UINT))) {
             display("push(");
             display_uintptr(tok->number);
             displayln(");");
+        } else if ((tok = read_token(TOK_NEGINT))) {
+            display("push((uintptr_t)-(intptr_t)");
+            display_uintptr(tok->number);
+            displayln(");");
         } else {
+            panic("huh?");
         }
     }
     displayln("}");
@@ -646,7 +697,7 @@ static void compile_parentheses(void)
         while (!read_the_word(")")) {
             if ((tok = read_token(TOK_STRING))) {
                 vec_puts(buf, tok->string);
-            } else if ((tok = read_token(TOK_INT))) {
+            } else if ((tok = read_token(TOK_UINT))) {
                 intptr_t i = (intptr_t)tok->number;
                 if ((i < 0x00) || (i > 0xff)) {
                     panic("byte out of range");
@@ -655,9 +706,12 @@ static void compile_parentheses(void)
             }
         }
     } else {
+        vec_mark(locals);
         while (!read_the_word(")")) {
             if ((tok = read_token(TOK_WORD))) {
-                add_local_variable(tok->string);
+                add_local(tok->string);
+            } else {
+                panic("wrong thing");
             }
         }
         compile_locals();
@@ -692,8 +746,6 @@ static void compile_recurse(void)
     display(def->c_func_name);
     displayln("();");
 }
-
-// static void compile_word(struct token *tok, size_t context) {}
 
 static int compile_top_level(void)
 {
@@ -748,6 +800,7 @@ int main(void)
     define_primitive("!", "prim_store");
     define_primitive("byte@", "prim_byte_fetch");
     define_primitive("byte!", "prim_byte_store");
+    define_primitive("bytes=", "prim_bytes_equal");
     define_primitive("allocate", "prim_allocate");
     define_primitive("and-bits", "prim_and_bits");
     define_primitive("call", "prim_call");
