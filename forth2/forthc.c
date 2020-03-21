@@ -42,10 +42,9 @@ struct definition {
 };
 
 struct local {
-    const char *forth_var_name;
+    const char *forth_name;
+    char *forth_name_setter;
     char *c_var_name;
-    char *c_getter_name;
-    char *c_setter_name;
 };
 
 static const char ascii[] = "0123456789"
@@ -512,15 +511,14 @@ static void define_builtin(
     def->tag = tag;
 }
 
-static void add_local_variable(const char *forth_var_name)
+static void add_local_variable(const char *forth_name)
 {
     struct local *local;
 
     local = vec_reserve(locals, 1);
-    local->forth_var_name = forth_var_name;
-    local->c_var_name = mangle("local_", forth_var_name);
-    local->c_getter_name = copy_string(forth_var_name);
-    local->c_setter_name = copy_two_strings(forth_var_name, "!");
+    local->forth_name = forth_name;
+    local->forth_name_setter = copy_two_strings(forth_name, "!");
+    local->c_var_name = mangle("local_", forth_name);
 }
 
 static void for_each_local(void (*func)(struct local *))
