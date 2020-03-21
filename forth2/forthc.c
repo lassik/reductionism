@@ -629,24 +629,6 @@ static void compile_definition(void)
     rollback_locals();
 }
 
-static void compile_quote(void)
-{
-    struct definition *def;
-    struct token *tok;
-    char *forth_word;
-
-    if (!(tok = read_token(TOK_WORD))) {
-        panic("word name expected");
-    }
-    forth_word = tok->string;
-    if (!(def = lookup(forth_word, DEF_USER))) {
-        panic1("not defined:", forth_word);
-    }
-    display("push((uintptr_t)");
-    display(def->c_func_name);
-    displayln(");");
-}
-
 static void compile_parentheses(void)
 {
     struct token *tok;
@@ -680,6 +662,24 @@ static void compile_parentheses(void)
         }
         compile_locals();
     }
+}
+
+static void compile_quote(void)
+{
+    struct definition *def;
+    struct token *tok;
+    char *forth_word;
+
+    if (!(tok = read_token(TOK_WORD))) {
+        panic("word name expected");
+    }
+    forth_word = tok->string;
+    if (!(def = lookup(forth_word, DEF_USER))) {
+        panic1("not defined:", forth_word);
+    }
+    display("push((uintptr_t)");
+    display(def->c_func_name);
+    displayln(");");
 }
 
 static void compile_and(void) { displayln("if (!flag) return;"); }
